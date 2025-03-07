@@ -373,8 +373,6 @@ class ListTables(VerticalGroup):
 class EtlSaphanaAthenaApp(App):
     CSS_PATH = "tcss/layout.tcss"
     COUNTER = count(1)
-    ROWS = 0
-    DATA = list()
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="sidebar"):
@@ -427,8 +425,8 @@ class EtlSaphanaAthenaApp(App):
             valores = self.list_tables.get_values()
 
             if all(valores):
-                self.ROWS = next(self.COUNTER)
-                self.table.add_row(str(self.ROWS), *valores)
+                counter= next(self.COUNTER)
+                self.table.add_row(str(counter), *valores)
 
                 data = [
                     f"{c:>20}: {v}"
