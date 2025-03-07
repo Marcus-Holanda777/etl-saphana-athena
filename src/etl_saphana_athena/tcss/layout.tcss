@@ -1,0 +1,20 @@
+#sidebar {
+    dock: left;
+    width: 40;
+    height: 100%;
+    padding: 1;
+    margin: 1;
+    border: dashed blue 50%;
+    align: center top;
+}
+
+#sidebar Button {
+    width: 100%;
+    margin: 1;
+    align-horizontal: center;
+}
+
+#body {
+    height: 100%;
+    border: dashed blue 50%;
+}
