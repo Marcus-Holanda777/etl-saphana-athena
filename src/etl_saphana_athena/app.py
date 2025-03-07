@@ -24,7 +24,7 @@ from textual import work
 from itertools import count
 from typing import Literal
 from etl_saphana_athena.config import create_config, load_config
-import asyncio
+from etl_saphana_athena.load import write_parquet
 
 
 CON_MARKDOWN = """\
@@ -397,8 +397,8 @@ class EtlSaphanaAthenaApp(App):
 
         for index in range(self.table.row_count):
             progress_bar.advance(index + 1)
-            __, table_name, schema, aws_schema, aws_table = self.table.get_row_at(index)
-            await asyncio.sleep(5.0)
+            __, table_name, schema, *__ = self.table.get_row_at(index)
+            await write_parquet(table_name, schema)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         id_button = event.button.id

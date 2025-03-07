@@ -11,8 +11,13 @@ CHUNK = 100_000
 
 
 def do_connect() -> Engine:
-    config = load_config()
-    url = URL.create("hanna", **config)
+    config = load_config().get("sap")
+
+    if config:
+        url = URL.create("hanna", **config)
+    else:
+        raise ValueError("Arquivo config nao existe !")
+
     return create_engine(url)
 
 
@@ -22,7 +27,7 @@ def get_columns(con: Engine, table_name: str, schema: str) -> dict:
     try:
         response = inspetor.get_columns(table_name=table_name, schema=schema)
     except NoSuchTableError:
-        raise ValueError("Table nao existe !")
+        raise ValueError("Tabela nao existe !")
     else:
         return {row["name"]: row["type"] for row in response}
 
@@ -39,7 +44,7 @@ def pandas_lotes(table_name: str, schema: str):
             yield count, chunk
 
 
-def write_parquet(table_name: str, schema: str) -> None:
+async def write_parquet(table_name: str, schema: str) -> None:
     gen_dataframe = pandas_lotes(table_name, schema)
 
     with tempfile.NamedTemporaryFile(
