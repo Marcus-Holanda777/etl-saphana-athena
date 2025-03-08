@@ -9,26 +9,28 @@ import pyarrow as pa
 import tempfile
 import asyncio
 from functools import partial
+from textual.widgets import Label
 
 
 CHUNK = 100_000
 
 MAP_TYPES = {
-    types.BIGINT: "Int64",
-    types.INTEGER: "Int32",
-    types.SMALLINT: "Int32",
-    types.TINYINT: "Int32",
-    types.BOOLEAN: "bool",
-    types.VARCHAR: "str",
-    types.CHAR: "str",
-    types.NVARCHAR: "str",
-    types.NCHAR: "str",
-    types.DOUBLE: "float64",
-    types.FLOAT: "float64",
-    types.REAL: "float64",
-    types.DECIMAL: "float64",
-    types.DATE: "datetime64[ns]",
-    types.TIMESTAMP: "datetime64[ns]",
+    types.BIGINT: pa.int64(),
+    types.INTEGER: pa.int32(),
+    types.SMALLINT: pa.int16(),
+    types.TINYINT: pa.int8(),
+    types.BOOLEAN: pa.bool_(),
+    types.VARCHAR: pa.string(),
+    types.CHAR: pa.string(),
+    types.NVARCHAR: pa.string(),
+    types.CLOB: pa.string(),
+    types.NCHAR: pa.string(),
+    types.DOUBLE: pa.float64(),
+    types.FLOAT: pa.float32(),
+    types.REAL: pa.float64(),
+    types.DECIMAL: pa.float32(),
+    types.DATE: pa.date64(),
+    types.TIMESTAMP: pa.timestamp("ns"),
 }
 
 
@@ -43,7 +45,21 @@ def do_connect() -> Engine:
     return create_engine(url)
 
 
-def get_columns(con: Engine, table_name: str, schema: str) -> dict:
+def create_stmt(con: Engine, table_name: str, schema: str) -> str:
+    inspetor = inspect(con)
+    response = inspetor.get_columns(table_name=table_name, schema=schema)
+
+    columns = [
+        f"TO_VARCHAR({row['name']}) AS {row['name']}"
+        if isinstance(row["type"], types.CLOB)
+        else f"{row['name']}"
+        for row in response
+    ]
+
+    return f"""select {",".join(columns)} from {schema}.{table_name}"""
+
+
+def get_columns(con: Engine, table_name: str, schema: str) -> pa.Schema:
     inspetor = inspect(con)
 
     try:
@@ -51,47 +67,43 @@ def get_columns(con: Engine, table_name: str, schema: str) -> dict:
     except NoSuchTableError:
         raise ValueError("Tabela nao existe !")
     else:
-        return {row["name"]: MAP_TYPES.get(row["type"], "object") for row in response}
+        return pa.schema(
+            [(row["name"], MAP_TYPES.get(type(row["type"]))) for row in response]
+        )
 
 
 def pandas_lotes(table_name: str, schema: str):
     engine = do_connect()
-    dtype = get_columns(engine, table_name, schema)
-    count = 0
+    dtype_arrow = get_columns(engine, table_name, schema)
+    stmt = create_stmt(engine, table_name, schema)
 
-    stmt = f"""
-    select * from {schema}.{table_name}
-    """
+    yield dtype_arrow
 
     with engine.begin() as con:
-        for chunk in pd.read_sql(
-            stmt, con=con, schema=schema, chunksize=CHUNK, dtype=dtype
-        ):
-            count += 1
-            yield count, chunk
+        for chunk in pd.read_sql(stmt, con=con, chunksize=CHUNK):
+            yield chunk
 
 
-async def write_parquet(table_name: str, schema: str) -> None:
+async def write_parquet(table_name: str, schema: str, status: Label) -> None:
     gen_dataframe = pandas_lotes(table_name, schema)
+    dtype_arrow = next(gen_dataframe)
+
+    status.update("Status: Tipos Arrow definido ...")
 
     with tempfile.NamedTemporaryFile(
         prefix="export_", suffix=".parquet", delete=False
     ) as f:
-        schema = None
-        writer = None
-
-        to_pandas = partial(pa.Table.from_pandas, preserve_index=False)
-
+        to_pandas = partial(
+            pa.Table.from_pandas, preserve_index=False, schema=dtype_arrow
+        )
         loop = asyncio.get_running_loop()
-        for p, df in gen_dataframe:
-            tbl = await loop.run_in_executor(None, to_pandas, df)
-            if schema is None:
-                schema = tbl.schema
 
-            if p == 1:
-                writer = pq.ParquetWriter(f, schema=schema, compression="zstd")
+        with pq.ParquetWriter(f, schema=dtype_arrow, compression="zstd") as writer:
+            total = 0
+            for df in gen_dataframe:
+                rows, __ = df.shape
+                total += rows
 
-            await loop.run_in_executor(None, writer.write_table, tbl, CHUNK)
-
-        if writer:
-            await loop.run_in_executor(None, writer.close)
+                tbl = await loop.run_in_executor(None, to_pandas, df)
+                await loop.run_in_executor(None, writer.write_table, tbl, CHUNK)
+                status.update(f"Status: {table_name}, {total}")

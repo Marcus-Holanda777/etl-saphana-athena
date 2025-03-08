@@ -346,6 +346,7 @@ class ListTables(VerticalGroup):
                 with Center():
                     self.progress_bar = ProgressBar(total=1, id="progress")
                     yield self.progress_bar
+                    yield Label(id='status')
 
     def get_values(self) -> list[str]:
         return [
@@ -386,10 +387,11 @@ class EtlSaphanaAthenaApp(App):
     @work
     async def update_progress(self, progress_bar: ProgressBar) -> None:
         progress_bar.progress = 0
+        status = self.query_one("#status", Label)
 
         for index in range(self.table.row_count):
             __, schema, table_name, *__ = self.table.get_row_at(index)
-            await write_parquet(table_name, schema)
+            await write_parquet(table_name, schema, status)
             progress_bar.advance(index + 1)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
