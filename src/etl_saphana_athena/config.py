@@ -2,7 +2,7 @@ from pathlib import Path
 import json
 
 HOME = Path.home()
-FILE = HOME.joinpath("~.export.json")
+FILE = HOME.joinpath(".export.json")
 
 
 def create_config(config: dict):
@@ -12,7 +12,7 @@ def create_config(config: dict):
         athena = {}
 
         for i, (k, v) in enumerate(config.items()):
-            if i < 5:
+            if i < 4:
                sap[k] = v
             else:
                 athena[k] = v

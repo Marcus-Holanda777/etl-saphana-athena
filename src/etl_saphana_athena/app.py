@@ -151,7 +151,6 @@ class Connector(VerticalGroup):
     COLUMNS = (
         "host",
         "port",
-        "database",
         "username",
         "password",
         "region_aws",
@@ -165,31 +164,27 @@ class Connector(VerticalGroup):
 
     def compose(self) -> ComposeResult:
         self.config = self.load_config()
+        config_sap = self.config.get("sap", dict())
+        config_athena = self.config.get("athena", dict())
 
         with TabbedContent(initial="tabsap", id="tabs"):
             with TabPane("SAPHANA", id="tabsap"):
                 with Grid(id="gridsap"):
                     yield Label("host")
                     self.host = Input(placeholder="name host", id="host")
-                    if host := self.config.get("host"):
+                    if host := config_sap.get("host"):
                         self.host.value = host
                     yield self.host
 
                     yield Label("port")
                     self.port = Input(placeholder="port", id="port", type="number")
-                    if port := self.config.get("port"):
+                    if port := config_sap.get("port"):
                         self.port.value = port
                     yield self.port
 
-                    yield Label("database")
-                    self.database = Input(placeholder="database", id="database")
-                    if database := self.config.get("database"):
-                        self.database.value = database
-                    yield self.database
-
                     yield Label("user")
                     self.user = Input(placeholder="user", id="user")
-                    if user := self.config.get("user"):
+                    if user := config_sap.get("username"):
                         self.user.value = user
                     yield self.user
 
@@ -197,7 +192,7 @@ class Connector(VerticalGroup):
                     self.password = Input(
                         placeholder="password", id="password", password=True
                     )
-                    if password := self.config.get("password"):
+                    if password := config_sap.get("password"):
                         self.password.value = password
                     yield self.password
 
@@ -205,7 +200,7 @@ class Connector(VerticalGroup):
                 with Grid(id="gridathena"):
                     yield Label("region")
                     self.region_aws = Input(placeholder="region", id="region")
-                    if region_aws := self.config.get("region_aws"):
+                    if region_aws := config_athena.get("region_aws"):
                         self.region_aws.value = region_aws
                     yield self.region_aws
 
@@ -213,7 +208,7 @@ class Connector(VerticalGroup):
                     self.s3_location = Input(
                         placeholder="s3 location", id="s3_location"
                     )
-                    if s3_location := self.config.get("s3_location"):
+                    if s3_location := config_athena.get("s3_location"):
                         self.s3_location.value = s3_location
                     yield self.s3_location
 
@@ -221,7 +216,7 @@ class Connector(VerticalGroup):
                     self.aws_access_key_id = Input(
                         placeholder="aws access key id", id="aws_access_key_id"
                     )
-                    if aws_access_key_id := self.config.get("aws_access_key_id"):
+                    if aws_access_key_id := config_athena.get("aws_access_key_id"):
                         self.aws_access_key_id.value = aws_access_key_id
                     yield self.aws_access_key_id
 
@@ -231,7 +226,7 @@ class Connector(VerticalGroup):
                         id="aws_secret_access_key",
                         password=True,
                     )
-                    if aws_secret_access_key := self.config.get(
+                    if aws_secret_access_key := config_athena.get(
                         "aws_secret_access_key"
                     ):
                         self.aws_secret_access_key.value = aws_secret_access_key
@@ -244,7 +239,6 @@ class Connector(VerticalGroup):
         data = [
             self.host.value.strip(),
             self.port.value.strip(),
-            self.database.value.strip(),
             self.user.value.strip(),
             self.password.value.strip(),
             self.region_aws.value.strip(),
@@ -394,9 +388,9 @@ class EtlSaphanaAthenaApp(App):
         progress_bar.progress = 0
 
         for index in range(self.table.row_count):
-            progress_bar.advance(index + 1)
-            __, table_name, schema, *__ = self.table.get_row_at(index)
+            __, schema, table_name, *__ = self.table.get_row_at(index)
             await write_parquet(table_name, schema)
+            progress_bar.advance(index + 1)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         id_button = event.button.id
@@ -425,7 +419,7 @@ class EtlSaphanaAthenaApp(App):
             valores = self.list_tables.get_values()
 
             if all(valores):
-                counter= next(self.COUNTER)
+                counter = next(self.COUNTER)
                 self.table.add_row(str(counter), *valores)
 
                 data = [

@@ -6,7 +6,7 @@ authors = [
     {name = "Marcus Holanda",email = "mvsh777@hotmail.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.12,<4.0"
+requires-python = ">=3.11,<4.0"
 dependencies = [
     "athena-mvsh (>=0.0.18,<0.0.19)",
     "hdbcli (>=2.23.27,<3.0.0)",
