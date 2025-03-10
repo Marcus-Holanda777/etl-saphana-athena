@@ -71,8 +71,8 @@ class DialogScreen(ModalScreen):
             grid-gutter: 1 2;
             grid-rows: 1fr 3;
             padding: 0 1;
-            width: 60;
-            height: 11;
+            width: 65;
+            height: 12;
             border: thick $background 80%;
             background: $surface;
         }
@@ -117,8 +117,8 @@ class DialogScreen(ModalScreen):
 
 class Sidebar(VerticalGroup):
     def compose(self) -> ComposeResult:
-        yield Button("CONFIG CONNECTOR", id="connector", variant="success")
-        yield Button("LISTS TABLES", id="listtable", variant="error")
+        yield Button("CONFIGURAR", id="connector", variant="success")
+        yield Button("CARREGAR", id="listtable", variant="error")
 
         with ContentSwitcher(initial="m_connector", id="m_content"):
             yield Markdown(CON_MARKDOWN, id="m_connector")
@@ -339,7 +339,7 @@ class ListTables(VerticalGroup):
                     yield Button("LIMPAR", id="btnlimpar", variant="error")
                     yield Button("INSERIR", id="btninserir", variant="warning")
 
-            with TabPane("LIST", id="tablist"):
+            with TabPane("TABELA", id="tablist"):
                 yield Tables(self.COLUMNS)
                 yield Button("EXPORTAR", id="btnexportar", variant="warning")
 
@@ -366,8 +366,36 @@ class ListTables(VerticalGroup):
 
 
 class EtlSaphanaAthenaApp(App):
-    CSS_PATH = "tcss/layout.tcss"
+    DEFAULT_CSS = """
+        #sidebar {
+            dock: left;
+            width: 40;
+            height: 100%;
+            padding: 1;
+            margin: 1;
+            border: dashed $primary 50%;
+            align: center top;
+        }
+
+        #sidebar Button {
+            width: 100%;
+            margin: 1;
+            align-horizontal: center;
+        }
+
+        #body {
+            height: 100%;
+            border: dashed $primary 50%;
+        }
+    """
+
+    TITLE = "EL"
+    SUB_TITLE = "saphana => athena"
     COUNTER = count(1)
+
+    BINDINGS = [
+        ('ctrl+q', 'quit', 'SAIR')
+    ]
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="sidebar"):
@@ -383,6 +411,9 @@ class EtlSaphanaAthenaApp(App):
 
         yield Header(id="header")
         yield Footer(id="footer")
+    
+    def on_mount(self) -> None:
+        self.theme = 'dracula'
 
     @work
     async def update_progress(self, progress_bar: ProgressBar) -> None:
@@ -424,16 +455,11 @@ class EtlSaphanaAthenaApp(App):
                 counter = next(self.COUNTER)
                 self.table.add_row(str(counter), *valores)
 
-                data = [
-                    f"{c:>20}: {v}"
-                    for c, v in zip(
-                        map(str.upper, self.list_tables.COLUMNS[1:]), valores
-                    )
-                ]
-
-                self.push_screen(DialogScreen("\n".join(data)))
+                self.push_screen(DialogScreen("\n".join(valores)))
                 self.list_tables.schema_sap.focus()
                 self.list_tables.progress_bar.total = self.table.row_count
+            else:
+                self.push_screen(DialogScreen("Validar campos !", variant="error"))
 
         if id_button == "btnexportar":
             self.update_progress(self.list_tables.progress_bar)

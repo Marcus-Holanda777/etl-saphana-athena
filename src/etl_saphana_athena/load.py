@@ -72,21 +72,36 @@ def get_columns(con: Engine, table_name: str, schema: str) -> pa.Schema:
         )
 
 
-def pandas_lotes(table_name: str, schema: str):
-    engine = do_connect()
-    dtype_arrow = get_columns(engine, table_name, schema)
-    stmt = create_stmt(engine, table_name, schema)
+async def async_do_connect():
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, do_connect)
+
+
+async def async_create_stmt(con: Engine, table_name: str, schema: str) -> str:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, create_stmt, con, table_name, schema)
+
+
+async def async_get_columns(con: Engine, table_name: str, schema: str) -> pa.Schema:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, get_columns, con, table_name, schema)
+
+
+async def async_pandas_lotes(table_name: str, schema: str):
+    engine = await async_do_connect()
+    dtype_arrow = await async_get_columns(engine, table_name, schema)
+    stmt = await async_create_stmt(engine, table_name, schema)
 
     yield dtype_arrow
 
-    with engine.begin() as con:
-        for chunk in pd.read_sql(stmt, con=con, chunksize=CHUNK):
+    async with engine.begin() as con:
+        async for chunk in pd.read_sql(stmt, con=con, chunksize=CHUNK):
             yield chunk
 
 
 async def write_parquet(table_name: str, schema: str, status: Label) -> None:
-    gen_dataframe = pandas_lotes(table_name, schema)
-    dtype_arrow = next(gen_dataframe)
+    gen_dataframe = async_pandas_lotes(table_name, schema)
+    dtype_arrow = gen_dataframe.__anext__()
 
     status.update("Status: Tipos Arrow definido ...")
 
@@ -100,7 +115,7 @@ async def write_parquet(table_name: str, schema: str, status: Label) -> None:
 
         with pq.ParquetWriter(f, schema=dtype_arrow, compression="zstd") as writer:
             total = 0
-            for df in gen_dataframe:
+            async for df in gen_dataframe:
                 rows, __ = df.shape
                 total += rows
 
