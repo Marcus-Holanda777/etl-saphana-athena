@@ -12,7 +12,7 @@ from functools import partial
 from textual.widgets import Label
 
 
-CHUNK = 100_000
+CHUNK = 10_000
 
 MAP_TYPES = {
     types.BIGINT: pa.int64(),
@@ -94,14 +94,14 @@ async def async_pandas_lotes(table_name: str, schema: str):
 
     yield dtype_arrow
 
-    async with engine.begin() as con:
-        async for chunk in pd.read_sql(stmt, con=con, chunksize=CHUNK):
+    with engine.begin() as con:
+        for chunk in pd.read_sql(stmt, con=con, chunksize=CHUNK):
             yield chunk
 
 
 async def write_parquet(table_name: str, schema: str, status: Label) -> None:
     gen_dataframe = async_pandas_lotes(table_name, schema)
-    dtype_arrow = gen_dataframe.__anext__()
+    dtype_arrow = await gen_dataframe.__anext__()
 
     status.update("Status: Tipos Arrow definido ...")
 

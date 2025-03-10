@@ -346,7 +346,7 @@ class ListTables(VerticalGroup):
                 with Center():
                     self.progress_bar = ProgressBar(total=1, id="progress")
                     yield self.progress_bar
-                    yield Label(id='status')
+                    yield Label(id="status")
 
     def get_values(self) -> list[str]:
         return [
@@ -393,9 +393,7 @@ class EtlSaphanaAthenaApp(App):
     SUB_TITLE = "saphana => athena"
     COUNTER = count(1)
 
-    BINDINGS = [
-        ('ctrl+q', 'quit', 'SAIR')
-    ]
+    BINDINGS = [("ctrl+q", "quit", "SAIR")]
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="sidebar"):
@@ -411,12 +409,12 @@ class EtlSaphanaAthenaApp(App):
 
         yield Header(id="header")
         yield Footer(id="footer")
-    
+
     def on_mount(self) -> None:
-        self.theme = 'dracula'
+        self.theme = "dracula"
 
     @work
-    async def update_progress(self, progress_bar: ProgressBar) -> None:
+    async def update_progress(self, progress_bar: ProgressBar, btn: Button) -> None:
         progress_bar.progress = 0
         status = self.query_one("#status", Label)
 
@@ -424,6 +422,9 @@ class EtlSaphanaAthenaApp(App):
             __, schema, table_name, *__ = self.table.get_row_at(index)
             await write_parquet(table_name, schema, status)
             progress_bar.advance(index + 1)
+
+        btn.loading = False
+        self.table.loading = False
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         id_button = event.button.id
@@ -462,7 +463,11 @@ class EtlSaphanaAthenaApp(App):
                 self.push_screen(DialogScreen("Validar campos !", variant="error"))
 
         if id_button == "btnexportar":
-            self.update_progress(self.list_tables.progress_bar)
+            btn_load = self.query_one(f"#{id_button}", Button)
+            btn_load.loading = True
+            self.table.loading = True
+
+            self.update_progress(self.list_tables.progress_bar, btn_load)
 
 
 def main():
