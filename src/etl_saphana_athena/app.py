@@ -20,7 +20,8 @@ from textual.containers import (
     VerticalScroll,
 )
 from textual.screen import ModalScreen
-from textual import work
+from textual import work, on
+from textual.widgets.data_table import CellDoesNotExist
 from itertools import count
 from typing import Literal
 from etl_saphana_athena.config import create_config, load_config
@@ -235,6 +236,16 @@ class Connector(VerticalGroup):
                     yield Label()
                     yield Button("SALVAR", id="btnsalvar", variant="warning")
 
+    @on(Button.Pressed, "#btnsalvar")
+    def salvar(self) -> None:
+        values = self.get_values()
+        if all(values):
+            config = dict(zip(self.COLUMNS, values))
+            create_config(config)
+            self.app.push_screen(DialogScreen("Dados salvo com sucesso !"))
+        else:
+            self.app.push_screen(DialogScreen("Validar campos !", variant="error"))
+
     def get_values(self) -> list:
         data = [
             self.host.value.strip(),
@@ -296,10 +307,22 @@ class ListTables(VerticalGroup):
                 width: 100%;
             }
         }
-
-        #btnexportar {
+        #crud_btn {
+            background: $boost;
+            height: 5;
             margin: 1;
-            align-horizontal: right;
+            min-width: 50;
+            padding: 1;
+        }
+        #btnlimpartbl {
+            dock: left;
+        }
+        #btndeletar {
+            dock: none;
+            margin-left: 1;
+        }
+        #btnexportar {
+            dock: right;
         }
     """
 
@@ -311,6 +334,8 @@ class ListTables(VerticalGroup):
         "aws_table",
         "aws_operation",
     )
+
+    COUNTER = count(1)
 
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="tabinsert"):
@@ -341,12 +366,84 @@ class ListTables(VerticalGroup):
 
             with TabPane("TABELA", id="tablist"):
                 yield Tables(self.COLUMNS)
-                yield Button("EXPORTAR", id="btnexportar", variant="warning")
+
+                with Horizontal(id="crud_btn"):
+                    yield Button("EXPORTAR", id="btnexportar", variant="primary")
+                    yield Button("LIMPAR", id="btnlimpartbl", variant="warning")
+                    yield Button("DELETAR", id="btndeletar", variant="error")
 
                 with Center():
                     self.progress_bar = ProgressBar(total=1, id="progress")
                     yield self.progress_bar
                     yield Label(id="status")
+
+    @work
+    async def update_progress(
+        self, progress_bar: ProgressBar, btn: Button, table: DataTable
+    ) -> None:
+        progress_bar.progress = 0
+        status = self.query_one("#status", Label)
+
+        for index in range(table.row_count):
+            __, schema, table_name, *__ = table.get_row_at(index)
+            await write_parquet(table_name, schema, status)
+            progress_bar.advance(index + 1)
+
+        btn.loading = False
+        table.loading = False
+
+    @on(Button.Pressed, "#btndeletar")
+    def delete_row(self):
+        table = self.query_one(DataTable)
+        try:
+            row_key, __ = table.coordinate_to_cell_key(table.cursor_coordinate)
+        except CellDoesNotExist:
+            self.app.push_screen(DialogScreen("Tabela vazia !", variant="error"))
+        else:
+            table.remove_row(row_key)
+
+    @on(Button.Pressed, "#btnlimpartbl")
+    def clear_table(self):
+        table = self.query_one(DataTable)
+        table.clear()
+        self.app.push_screen(DialogScreen("Tabela vazia !", variant="error"))
+
+    @on(Button.Pressed, "#btnexportar")
+    def export_rows(self, event: Button.Pressed) -> None:
+        table = self.query_one(DataTable)
+        if table.row_count > 0:
+            btn_load = self.query_one(f"#{event.button.id}", Button)
+            btn_load.loading = True
+            table.loading = True
+            self.update_progress(self.progress_bar, btn_load, table)
+        else:
+            self.app.push_screen(DialogScreen("Tabela Vazia !", variant="error"))
+
+    @on(Button.Pressed, "#btnlimpar")
+    def _clear_values(self) -> None:
+        self.clear_values()
+
+    def clear_values(self) -> None:
+        self.schema_sap.value = ""
+        self.table_name_sap.value = ""
+        self.schema_aws.value = ""
+        self.table_name_aws.value = ""
+        self.operation_aws.value = ""
+
+    @on(Button.Pressed, "#btninserir")
+    def insert(self) -> None:
+        table = self.query_one(DataTable)
+        valores = self.get_values()
+
+        if all(valores):
+            counter = next(self.COUNTER)
+            table.add_row(str(counter), *valores)
+
+            self.app.push_screen(DialogScreen("\n".join(valores)))
+            self.schema_sap.focus()
+            self.progress_bar.total = table.row_count
+        else:
+            self.app.push_screen(DialogScreen("Validar campos !", variant="error"))
 
     def get_values(self) -> list[str]:
         return [
@@ -356,13 +453,6 @@ class ListTables(VerticalGroup):
             self.table_name_aws.value.strip(),
             self.operation_aws.value.strip(),
         ]
-
-    def clear_values(self) -> None:
-        self.schema_sap.value = ""
-        self.table_name_sap.value = ""
-        self.schema_aws.value = ""
-        self.table_name_aws.value = ""
-        self.operation_aws.value = ""
 
 
 class EtlSaphanaAthenaApp(App):
@@ -391,8 +481,6 @@ class EtlSaphanaAthenaApp(App):
 
     TITLE = "EL"
     SUB_TITLE = "saphana => athena"
-    COUNTER = count(1)
-
     BINDINGS = [("ctrl+q", "quit", "SAIR")]
 
     def compose(self) -> ComposeResult:
@@ -404,8 +492,7 @@ class EtlSaphanaAthenaApp(App):
                 yield Connector(id="connector")
 
                 with VerticalScroll(id="listtable"):
-                    self.list_tables = ListTables()
-                    yield self.list_tables
+                    yield ListTables()
 
         yield Header(id="header")
         yield Footer(id="footer")
@@ -413,61 +500,12 @@ class EtlSaphanaAthenaApp(App):
     def on_mount(self) -> None:
         self.theme = "dracula"
 
-    @work
-    async def update_progress(self, progress_bar: ProgressBar, btn: Button) -> None:
-        progress_bar.progress = 0
-        status = self.query_one("#status", Label)
-
-        for index in range(self.table.row_count):
-            __, schema, table_name, *__ = self.table.get_row_at(index)
-            await write_parquet(table_name, schema, status)
-            progress_bar.advance(index + 1)
-
-        btn.loading = False
-        self.table.loading = False
-
     def on_button_pressed(self, event: Button.Pressed) -> None:
         id_button = event.button.id
 
         if id_button in ("connector", "listtable"):
             self.query_one("#content", ContentSwitcher).current = id_button
             self.query_one("#m_content", ContentSwitcher).current = f"m_{id_button}"
-
-        if id_button == "btnsalvar":
-            con = self.query_one("#connector", Connector)
-            values = con.get_values()
-
-            if all(values):
-                config = dict(zip(con.COLUMNS, values))
-                create_config(config)
-                self.push_screen(DialogScreen("Dados salvo com sucesso !"))
-
-            else:
-                self.push_screen(DialogScreen("Validar campos !", variant="error"))
-
-        if id_button == "btnlimpar":
-            self.list_tables.clear_values()
-
-        if id_button == "btninserir":
-            self.table = self.query_one("#ref_table", DataTable)
-            valores = self.list_tables.get_values()
-
-            if all(valores):
-                counter = next(self.COUNTER)
-                self.table.add_row(str(counter), *valores)
-
-                self.push_screen(DialogScreen("\n".join(valores)))
-                self.list_tables.schema_sap.focus()
-                self.list_tables.progress_bar.total = self.table.row_count
-            else:
-                self.push_screen(DialogScreen("Validar campos !", variant="error"))
-
-        if id_button == "btnexportar":
-            btn_load = self.query_one(f"#{id_button}", Button)
-            btn_load.loading = True
-            self.table.loading = True
-
-            self.update_progress(self.list_tables.progress_bar, btn_load)
 
 
 def main():
