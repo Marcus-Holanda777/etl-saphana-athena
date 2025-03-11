@@ -1,4 +1,6 @@
 from textual.app import App, ComposeResult
+from textual.suggester import SuggestFromList
+from textual.validation import Function
 from textual.widgets import (
     Footer,
     Header,
@@ -27,6 +29,28 @@ from typing import Literal
 from etl_saphana_athena.config import create_config, load_config
 from etl_saphana_athena.load import write_parquet
 
+LIST_ATHENA = ["replace", "append", "merge"]
+
+LIST_REGION = [
+    "us-east-1",
+    "us-east-2",
+    "ap-northeast-1",
+    "ap-northeast-2",
+    "ap-northeast-3",
+    "ap-south-1",
+    "ap-southeast-1",
+    "ap-southeast-2",
+    "ca-central-1",
+    "eu-central-1",
+    "eu-west-1",
+    "eu-west-2",
+    "eu-west-3",
+    "sa-east-1",
+    "us-west-1",
+    "us-west-2",
+    "cn-north-1",
+    "cn-northwest-1",
+]
 
 CON_MARKDOWN = """\
 # Conexao SAP/ATHENA
@@ -154,8 +178,9 @@ class Connector(VerticalGroup):
         "port",
         "username",
         "password",
-        "region_aws",
-        "s3_location",
+        "region_name",
+        "s3_staging_dir",
+        "s3_dir",
         "aws_access_key_id",
         "aws_secret_access_key",
     )
@@ -200,18 +225,28 @@ class Connector(VerticalGroup):
             with TabPane("ATHENA", id="tabathena"):
                 with Grid(id="gridathena"):
                     yield Label("region")
-                    self.region_aws = Input(placeholder="region", id="region")
-                    if region_aws := config_athena.get("region_aws"):
-                        self.region_aws.value = region_aws
-                    yield self.region_aws
+                    self.region_name = Input(
+                        placeholder="region",
+                        id="region",
+                        suggester=SuggestFromList(LIST_REGION),
+                    )
+                    if region_name := config_athena.get("region_name"):
+                        self.region_name.value = region_name
+                    yield self.region_name
 
                     yield Label("s3_location")
                     self.s3_location = Input(
                         placeholder="s3 location", id="s3_location"
                     )
-                    if s3_location := config_athena.get("s3_location"):
+                    if s3_location := config_athena.get("s3_staging_dir"):
                         self.s3_location.value = s3_location
                     yield self.s3_location
+
+                    yield Label("s3_dir")
+                    self.s3_dir = Input(placeholder="s3 dir", id="s3_dir")
+                    if s3_dir := config_athena.get("s3_dir"):
+                        self.s3_dir.value = s3_dir
+                    yield self.s3_dir
 
                     yield Label("aws_access_key_id")
                     self.aws_access_key_id = Input(
@@ -252,8 +287,9 @@ class Connector(VerticalGroup):
             self.port.value.strip(),
             self.user.value.strip(),
             self.password.value.strip(),
-            self.region_aws.value.strip(),
+            self.region_name.value.strip(),
             self.s3_location.value.strip(),
+            self.s3_dir.value.strip(),
             self.aws_access_key_id.value.strip(),
             self.aws_secret_access_key.value.strip(),
         ]
@@ -358,7 +394,11 @@ class ListTables(VerticalGroup):
                     yield self.table_name_aws
 
                     yield Label("aws operation")
-                    self.operation_aws = Input(placeholder="aws operation")
+                    self.operation_aws = Input(
+                        placeholder="aws operation",
+                        suggester=SuggestFromList(LIST_ATHENA),
+                        validators=[Function(lambda x: x in LIST_ATHENA)],
+                    )
                     yield self.operation_aws
 
                     yield Button("LIMPAR", id="btnlimpar", variant="error")
@@ -385,8 +425,13 @@ class ListTables(VerticalGroup):
         status = self.query_one("#status", Label)
 
         for index in range(table.row_count):
-            __, schema, table_name, *__ = table.get_row_at(index)
-            await write_parquet(table_name, schema, status)
+            __, schema, table_name, aws_schema, aws_table_name, aws_operation = (
+                table.get_row_at(index)
+            )
+
+            await write_parquet(
+                table_name, schema, status, aws_schema, aws_table_name, aws_operation
+            )
             progress_bar.advance(index + 1)
 
         btn.loading = False
@@ -476,6 +521,9 @@ class EtlSaphanaAthenaApp(App):
         #body {
             height: 100%;
             border: dashed $primary 50%;
+        }
+        LoadingIndicator {
+            color: red;
         }
     """
 

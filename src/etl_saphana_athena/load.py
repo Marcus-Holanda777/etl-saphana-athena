@@ -10,6 +10,8 @@ import tempfile
 import asyncio
 from functools import partial
 from textual.widgets import Label
+from athena_mvsh import Athena, CursorParquetDuckdb
+from typing import Literal
 
 
 CHUNK = 10_000
@@ -72,6 +74,30 @@ def get_columns(con: Engine, table_name: str, schema: str) -> pa.Schema:
         )
 
 
+def export_athena(
+    file: str,
+    table_name: str,
+    schema: str,
+    operation: Literal["replace", "append", "merge"] = "replace",
+) -> None:
+    if operation == "merge":
+        return
+
+    config = load_config().get("athena")
+    location = config.pop("s3_dir")
+
+    cursor = CursorParquetDuckdb(**config)
+
+    with Athena(cursor=cursor) as client:
+        client.write_table_iceberg(
+            file,
+            table_name=table_name,
+            schema=schema,
+            location=f"{location}{table_name}/",
+            if_exists=operation,
+        )
+
+
 async def async_do_connect():
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, do_connect)
@@ -99,11 +125,23 @@ async def async_pandas_lotes(table_name: str, schema: str):
             yield chunk
 
 
-async def write_parquet(table_name: str, schema: str, status: Label) -> None:
+async def async_export_athena(*args):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, export_athena, *args)
+
+
+async def write_parquet(
+    table_name: str,
+    schema: str,
+    status: Label,
+    aws_schema: str,
+    aws_table_name: str,
+    aws_operation: Literal["replace", "append", "merge"],
+) -> None:
     gen_dataframe = async_pandas_lotes(table_name, schema)
     dtype_arrow = await gen_dataframe.__anext__()
 
-    status.update("Status: Tipos Arrow definido ...")
+    status.update("SAP: Tipos Arrow definido ...")
 
     with tempfile.NamedTemporaryFile(
         prefix="export_", suffix=".parquet", delete=False
@@ -121,4 +159,10 @@ async def write_parquet(table_name: str, schema: str, status: Label) -> None:
 
                 tbl = await loop.run_in_executor(None, to_pandas, df)
                 await loop.run_in_executor(None, writer.write_table, tbl, CHUNK)
-                status.update(f"Status: {table_name}, {total}")
+                status.update(f"SAP: {table_name}, {total}")
+
+        f.close()
+
+        status.update(f"ATHENA: init: {aws_table_name} - {aws_operation}")
+        await async_export_athena(f.name, aws_table_name, aws_schema, aws_operation)
+        status.update(f"ATHENA: fin: {table_name} - {total}")
