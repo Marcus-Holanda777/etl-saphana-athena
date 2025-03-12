@@ -20,46 +20,66 @@ Este projeto permite a exportação de tabelas do SAP HANA para arquivos Parquet
 
 ## Capturas de Tela
 
-Adicione aqui as imagens das telas do aplicativo:
+### 1. Configuração da conexão com o SAP HANA
 
 ![config SAP](img/config_sap.png)
+
+### 2. Configuração da conexão com o AWS Athena
+
 ![config ATHENA](img/config_athena.png)
+
+### 3. Seleção das tabelas e destino no Athena
+
 ![insert](img/insert.png)
+
+### 4. Execução do processo de exportação
+
 ![execute](img/execute.png)
 
 ## Como Usar
 
-### 1. Instalar dependências
+### 1. Instalar o aplicativo com `pipx`
+
+Recomenda-se instalar o aplicativo usando `pipx` para facilitar sua execução como um comando global:
 
 ```bash
-pip install -r requirements.txt
+pip install --user pipx
+pipx ensurepath
+pipx install .
 ```
+
+Isso permitirá que o aplicativo seja chamado diretamente como `export`.
 
 ### 2. Configurar Conexões
 
 As configurações de conexão são armazenadas em um arquivo JSON. O usuário poderá inserir os dados pela interface na primeira execução.
 
-Exemplo de `config.json`:
+Exemplo de `.export.json`:
 
 ```json
 {
-    "sap_hana": {
-        "host": "hostname",
-        "port": 30015,
-        "user": "username",
+    "sap": {
+        "host": "host",
+        "port": "33035",
+        "username": "user",
         "password": "password"
     },
-    "aws_athena": {
-        "s3_bucket": "seu-bucket",
-        "database": "seu-database"
+    "athena": {
+        "region_name": "us-east-1",
+        "s3_staging_dir": "s3://bucket-name/",
+        "s3_dir": "s3://bucket-name/tables/",
+        "aws_access_key_id": "id",
+        "aws_secret_access_key": "secret"
     }
 }
 ```
 
 ### 3. Executar o Aplicativo
 
+Após a instalação com `pipx`, basta rodar:
+
 ```bash
-python main.py
+export
 ```
 
 A interface interativa permitirá selecionar tabelas, configurar a exportação e acompanhar o progresso do processo.
@@ -67,22 +87,11 @@ A interface interativa permitirá selecionar tabelas, configurar a exportação 
 ## Estrutura do Projeto
 
 ```
-📦 projeto
- ┣ 📂 src
- ┃ ┣ 📜 main.py            # Arquivo principal que inicia a interface
+📦 src
+ ┣ 📂 etl_saphana_athena
+ ┃ ┣ 📜 app.py             # Arquivo principal que inicia a interface
  ┃ ┣ 📜 config.py          # Gerenciamento de configurações
- ┃ ┣ 📜 exporter.py        # Lógica de exportação SAP HANA → Parquet → Athena
- ┃ ┣ 📜 ui.py              # Interface com Textualize
- ┣ 📜 requirements.txt     # Dependências do projeto
+ ┃ ┣ 📜 load.py            # Lógica de exportação SAP HANA → Parquet → Athena
+ ┃ ┣ 📜 app.py             # Interface com Textualize
  ┣ 📜 README.md            # Documentação do projeto
- ┣ 📜 config.json          # Configurações de conexão (criado na primeira execução)
 ```
-
-## Contribuição
-
-Sinta-se à vontade para abrir issues ou enviar pull requests com melhorias e sugestões!
-
-## Licença
-
-Este projeto é licenciado sob a MIT License.
-
