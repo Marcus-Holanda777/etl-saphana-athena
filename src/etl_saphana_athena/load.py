@@ -12,6 +12,7 @@ from functools import partial
 from textual.widgets import Label
 from athena_mvsh import Athena, CursorParquetDuckdb
 from typing import Literal
+import socket
 
 
 CHUNK = 10_000
@@ -36,38 +37,52 @@ MAP_TYPES = {
 }
 
 
+def test_network_connectivity(host: str, port: str | int, timeout: int = 4) -> bool:
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except (socket.timeout, socket.error) as e:
+        return False
+
+
 def do_connect() -> Engine:
     config = load_config().get("sap")
 
     if config:
-        url = URL.create("hana", **config)
+        if test_network_connectivity(config.get("host"), config.get("port")):
+            url = URL.create("hana", **config)
+            return create_engine(url)
+        else:
+            raise ValueError("Erro na conexao !")
     else:
         raise ValueError("Arquivo config nao existe !")
 
-    return create_engine(url)
-
 
 def create_stmt(con: Engine, table_name: str, schema: str) -> str:
-    inspetor = inspect(con)
-    response = inspetor.get_columns(table_name=table_name, schema=schema)
+    try:
+        inspetor = inspect(con)
+        response = inspetor.get_columns(table_name=table_name, schema=schema)
 
-    columns = [
-        f"TO_VARCHAR({row['name']}) AS {row['name']}"
-        if isinstance(row["type"], types.CLOB)
-        else f"{row['name']}"
-        for row in response
-    ]
+        columns = [
+            f"TO_VARCHAR({row['name']}) AS {row['name']}"
+            if isinstance(row["type"], types.CLOB)
+            else f"{row['name']}"
+            for row in response
+        ]
 
-    return f"""select {",".join(columns)} from {schema}.{table_name}"""
+        return f"""select {",".join(columns)} from {schema}.{table_name}"""
+    except Exception as e:
+        raise ValueError(str(e))
 
 
 def get_columns(con: Engine, table_name: str, schema: str) -> pa.Schema:
-    inspetor = inspect(con)
-
     try:
+        inspetor = inspect(con)
         response = inspetor.get_columns(table_name=table_name, schema=schema)
     except NoSuchTableError:
         raise ValueError("Tabela nao existe !")
+    except Exception as e:
+        raise ValueError(str(e))
     else:
         return pa.schema(
             [(row["name"], MAP_TYPES.get(type(row["type"]))) for row in response]
@@ -80,22 +95,25 @@ def export_athena(
     schema: str,
     operation: Literal["replace", "append", "merge"] = "replace",
 ) -> None:
-    if operation == "merge":
-        return
+    try:
+        if operation == "merge":
+            return
 
-    config = load_config().get("athena")
-    location = config.pop("s3_dir")
+        config = load_config().get("athena")
+        location = config.pop("s3_dir")
 
-    cursor = CursorParquetDuckdb(**config)
+        cursor = CursorParquetDuckdb(**config)
 
-    with Athena(cursor=cursor) as client:
-        client.write_table_iceberg(
-            file,
-            table_name=table_name,
-            schema=schema,
-            location=f"{location}{table_name}/",
-            if_exists=operation,
-        )
+        with Athena(cursor=cursor) as client:
+            client.write_table_iceberg(
+                file,
+                table_name=table_name,
+                schema=schema,
+                location=f"{location}{table_name}/",
+                if_exists=operation,
+            )
+    except Exception as e:
+        raise ValueError(str(e))
 
 
 async def async_do_connect():
@@ -163,6 +181,6 @@ async def write_parquet(
 
         f.close()
 
-        status.update(f"ATHENA: init: {aws_table_name} - {aws_operation}")
+        status.update(f"ATHENA: {aws_table_name} - {aws_operation}")
         await async_export_athena(f.name, aws_table_name, aws_schema, aws_operation)
-        status.update(f"ATHENA: fin: {table_name} - {total}")
+        status.update(f"ATHENA: {aws_table_name} - {total} - {aws_operation}")

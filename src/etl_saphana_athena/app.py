@@ -13,6 +13,7 @@ from textual.widgets import (
     Markdown,
     DataTable,
     ProgressBar,
+    Digits,
 )
 from textual.containers import (
     VerticalGroup,
@@ -20,14 +21,17 @@ from textual.containers import (
     Grid,
     Center,
     VerticalScroll,
+    Container,
 )
 from textual.screen import ModalScreen
 from textual import work, on
 from textual.widgets.data_table import CellDoesNotExist
+from textual.reactive import reactive
 from itertools import count
 from typing import Literal
 from etl_saphana_athena.config import create_config, load_config
 from etl_saphana_athena.load import write_parquet
+from time import monotonic
 
 LIST_ATHENA = ["replace", "append", "merge"]
 
@@ -83,6 +87,79 @@ Informe as tabelas que serão exportadas pro `ATHENA`.
 """
 
 
+class TimeDisplay(Digits):
+    start_time = reactive(monotonic)
+    time = reactive(0.0)
+    total = reactive(0.0)
+
+    def on_mount(self) -> None:
+        self.update_timer = self.set_interval(1 / 60, self.update_time, pause=True)
+
+    def update_time(self) -> None:
+        self.time = self.total + (monotonic() - self.start_time)
+
+    def watch_time(self, time: float) -> None:
+        minutes, seconds = divmod(time, 60)
+        hours, minutes = divmod(minutes, 60)
+        self.update(f"{hours:02,.0f}:{minutes:02.0f}:{seconds:05.2f}")
+
+    def start(self) -> None:
+        self.start_time = monotonic()
+        self.update_timer.resume()
+
+    def stop(self):
+        self.update_timer.pause()
+        self.total += monotonic() - self.start_time
+        self.time = self.total
+
+    def reset(self):
+        self.total = 0
+        self.time = 0
+
+
+class YesOrNo(ModalScreen):
+    DEFAULT_CSS = """
+        YesOrNo {
+            align: center middle;
+        }
+        YesOrNo > Container {
+            width: auto;
+            height: auto;
+            padding: 1 2;
+            border: thick $background 80%;
+            background: $surface;
+        }
+        YesOrNo > Container > Horizontal {
+            width: auto;
+            height: auto;
+        }
+        YesOrNo > Container > Horizontal > Button {
+            margin: 0 1;
+        }
+        YesOrNo > Container > Label {
+            margin: 1 2;
+        }
+    """
+
+    def __init__(self, msg: str) -> None:
+        super().__init__()
+        self.msg = msg
+
+    def compose(self) -> ComposeResult:
+        with Container():
+            yield Label(self.msg)
+            with Horizontal():
+                yield Button.success("Yes", id="yes")
+                yield Button.error("No", id="no")
+
+    @on(Button.Pressed)
+    def remove_screen(self, event: Button.Pressed) -> None:
+        if event.button.id == "yes":
+            self.dismiss(True)
+        else:
+            self.dismiss(False)
+
+
 class DialogScreen(ModalScreen):
     """Screen with a dialog to show a message."""
 
@@ -135,9 +212,9 @@ class DialogScreen(ModalScreen):
             id="dialog",
         )
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "ok":
-            self.app.pop_screen()
+    @on(Button.Pressed, "#ok")
+    def remove_screen(self) -> None:
+        self.app.pop_screen()
 
 
 class Sidebar(VerticalGroup):
@@ -360,6 +437,11 @@ class ListTables(VerticalGroup):
         #btnexportar {
             dock: right;
         }
+        TimeDisplay {
+            text-align: center;
+            color: $foreground-muted;
+            height: 3;
+        }
     """
 
     COLUMNS = (
@@ -411,31 +493,50 @@ class ListTables(VerticalGroup):
                     yield Button("EXPORTAR", id="btnexportar", variant="primary")
                     yield Button("LIMPAR", id="btnlimpartbl", variant="warning")
                     yield Button("DELETAR", id="btndeletar", variant="error")
+                    yield TimeDisplay()
 
                 with Center():
-                    self.progress_bar = ProgressBar(total=1, id="progress")
+                    self.progress_bar = ProgressBar(id="progress", show_eta=False)
                     yield self.progress_bar
                     yield Label(id="status")
+
+    @on(Input.Changed)
+    def lower(self, event: Input.Changed) -> None:
+        event.input.value = event.input.value.lower()
 
     @work
     async def update_progress(
         self, progress_bar: ProgressBar, btn: Button, table: DataTable
     ) -> None:
-        progress_bar.progress = 0
-        status = self.query_one("#status", Label)
+        display = self.query_one(TimeDisplay)
+        display.reset()
+        display.start()
 
-        for index in range(table.row_count):
-            __, schema, table_name, aws_schema, aws_table_name, aws_operation = (
-                table.get_row_at(index)
-            )
+        try:
+            progress_bar.total = table.row_count
+            progress_bar.progress = 0
+            status = self.query_one("#status", Label)
 
-            await write_parquet(
-                table_name, schema, status, aws_schema, aws_table_name, aws_operation
-            )
-            progress_bar.advance(index + 1)
+            for index in range(table.row_count):
+                __, schema, table_name, aws_schema, aws_table_name, aws_operation = (
+                    table.get_row_at(index)
+                )
 
-        btn.loading = False
-        table.loading = False
+                await write_parquet(
+                    table_name,
+                    schema,
+                    status,
+                    aws_schema,
+                    aws_table_name,
+                    aws_operation,
+                )
+                progress_bar.advance(index + 1)
+        except Exception as e:
+            self.app.push_screen(DialogScreen(str(e), variant="error"))
+        finally:
+            btn.loading = False
+            table.loading = False
+            display.stop()
 
     @on(Button.Pressed, "#btndeletar")
     def delete_row(self):
@@ -455,12 +556,16 @@ class ListTables(VerticalGroup):
 
     @on(Button.Pressed, "#btnexportar")
     def export_rows(self, event: Button.Pressed) -> None:
+        def callback_export(yes: bool | None) -> None:
+            if yes:
+                btn_load = self.query_one(f"#{event.button.id}", Button)
+                btn_load.loading = True
+                table.loading = True
+                self.update_progress(self.progress_bar, btn_load, table)
+
         table = self.query_one(DataTable)
         if table.row_count > 0:
-            btn_load = self.query_one(f"#{event.button.id}", Button)
-            btn_load.loading = True
-            table.loading = True
-            self.update_progress(self.progress_bar, btn_load, table)
+            self.app.push_screen(YesOrNo("Deseja realizar o EL ?"), callback_export)
         else:
             self.app.push_screen(DialogScreen("Tabela Vazia !", variant="error"))
 
@@ -486,7 +591,6 @@ class ListTables(VerticalGroup):
 
             self.app.push_screen(DialogScreen("\n".join(valores)))
             self.schema_sap.focus()
-            self.progress_bar.total = table.row_count
         else:
             self.app.push_screen(DialogScreen("Validar campos !", variant="error"))
 
