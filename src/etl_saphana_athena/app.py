@@ -73,7 +73,7 @@ Informa os dados de conexao `SAPHANA` e `ATHENA`.
 """
 
 LIST_MARKDOWN = """\
-# Tabelas ETL
+# Tabelas EL
 
 Informe as tabelas que serão exportadas pro `ATHENA`.
 
@@ -490,7 +490,7 @@ class ListTables(VerticalGroup):
                 yield Tables(self.COLUMNS)
 
                 with Horizontal(id="crud_btn"):
-                    yield Button("EXPORTAR", id="btnexportar", variant="primary")
+                    yield Button("EXPORTAR", id="btnexportar", variant="success")
                     yield Button("LIMPAR", id="btnlimpartbl", variant="warning")
                     yield Button("DELETAR", id="btndeletar", variant="error")
                     yield TimeDisplay()
@@ -626,8 +626,8 @@ class EtlSaphanaAthenaApp(App):
             height: 100%;
             border: dashed $primary 50%;
         }
-        LoadingIndicator {
-            color: red;
+        .-textual-loading-indicator {
+            color: $secondary;
         }
     """
 
