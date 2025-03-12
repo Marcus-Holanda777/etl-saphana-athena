@@ -32,6 +32,7 @@ from typing import Literal
 from etl_saphana_athena.config import create_config, load_config
 from etl_saphana_athena.load import write_parquet
 from time import monotonic
+from rich.markup import escape
 
 LIST_ATHENA = ["replace", "append", "merge"]
 
@@ -532,7 +533,7 @@ class ListTables(VerticalGroup):
                 )
                 progress_bar.advance(index + 1)
         except Exception as e:
-            self.app.push_screen(DialogScreen(str(e), variant="error"))
+            self.app.push_screen(DialogScreen(escape(str(e)), variant="error"))
         finally:
             btn.loading = False
             table.loading = False

@@ -13,6 +13,7 @@ from textual.widgets import Label
 from athena_mvsh import Athena, CursorParquetDuckdb
 from typing import Literal
 import socket
+from rich.markup import escape
 
 
 CHUNK = 10_000
@@ -41,7 +42,7 @@ def test_network_connectivity(host: str, port: str | int, timeout: int = 4) -> b
     try:
         with socket.create_connection((host, int(port)), timeout=timeout):
             return True
-    except (socket.timeout, socket.error) as e:
+    except (socket.timeout, socket.error):
         return False
 
 
@@ -72,7 +73,7 @@ def create_stmt(con: Engine, table_name: str, schema: str) -> str:
 
         return f"""select {",".join(columns)} from {schema}.{table_name}"""
     except Exception as e:
-        raise ValueError(str(e))
+        raise ValueError(escape(str(e)))
 
 
 def get_columns(con: Engine, table_name: str, schema: str) -> pa.Schema:
@@ -82,7 +83,7 @@ def get_columns(con: Engine, table_name: str, schema: str) -> pa.Schema:
     except NoSuchTableError:
         raise ValueError("Tabela nao existe !")
     except Exception as e:
-        raise ValueError(str(e))
+        raise ValueError(escape(str(e)))
     else:
         return pa.schema(
             [(row["name"], MAP_TYPES.get(type(row["type"]))) for row in response]
@@ -113,7 +114,7 @@ def export_athena(
                 if_exists=operation,
             )
     except Exception as e:
-        raise ValueError(str(e))
+        raise ValueError(escape(str(e)))
 
 
 async def async_do_connect():
