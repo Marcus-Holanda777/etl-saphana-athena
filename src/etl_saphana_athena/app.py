@@ -307,6 +307,7 @@ class Connector(VerticalGroup):
                         placeholder="region",
                         id="region",
                         suggester=SuggestFromList(LIST_REGION),
+                        validators=[Function(lambda x: x in LIST_REGION)],
                     )
                     if region_name := config_athena.get("region_name"):
                         self.region_name.value = region_name
